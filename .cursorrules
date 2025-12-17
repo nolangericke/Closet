@@ -1,0 +1,295 @@
+# Closet - Personal Inventory App
+# SwiftUI + SwiftData for iOS 26
+
+## Project Overview
+This is a personal inventory/closet management app built with:
+- **SwiftUI** for the user interface
+- **SwiftData** for persistence
+- **Target**: iOS 26+ (iPhone and iPad)
+
+## Technology Stack
+- Swift 6.0+
+- SwiftUI (iOS 26+)
+- SwiftData (iOS 26+)
+- Xcode 26+
+
+---
+
+## Code Style & Conventions
+
+### Swift Style
+- Use Swift's modern concurrency (async/await) where appropriate
+- Prefer `let` over `var` when values don't change
+- Use meaningful, descriptive names for variables, functions, and types
+- Follow Swift API Design Guidelines
+- Use trailing closure syntax for cleaner code
+- Prefer `guard` for early exits
+
+### SwiftUI Conventions
+- Keep views small and focused - extract subviews when a view exceeds ~50 lines
+- Use `@ViewBuilder` for complex conditional view logic
+- Prefer composition over inheritance
+- Use `private` access control for internal view helpers
+- Name views descriptively: `ItemDetailView`, `CategoryListView`, `AddItemSheet`
+
+### File Organization
+```
+Closet/
+├── App/
+│   └── ClosetApp.swift
+├── Models/
+│   ├── Item.swift
+│   ├── Category.swift
+│   └── Tag.swift
+├── Views/
+│   ├── ContentView.swift
+│   ├── Items/
+│   ├── Categories/
+│   └── Components/
+├── ViewModels/ (if using MVVM)
+├── Services/
+├── Extensions/
+└── Utilities/
+```
+
+---
+
+## SwiftData Guidelines
+
+### Model Definition
+```swift
+import SwiftData
+
+@Model
+final class Item {
+    var name: String
+    var itemDescription: String?  // Avoid "description" - reserved
+    var quantity: Int
+    var dateAdded: Date
+    var lastModified: Date
+    
+    // Relationships
+    @Relationship(deleteRule: .nullify)
+    var category: Category?
+    
+    @Relationship(deleteRule: .nullify, inverse: \Tag.items)
+    var tags: [Tag]
+    
+    init(name: String, quantity: Int = 1) {
+        self.name = name
+        self.quantity = quantity
+        self.dateAdded = Date()
+        self.lastModified = Date()
+        self.tags = []
+    }
+}
+```
+
+### Key SwiftData Patterns
+1. **Use `@Query` for fetching data in views**
+   ```swift
+   @Query(sort: \Item.name) private var items: [Item]
+   @Query(filter: #Predicate<Item> { $0.quantity > 0 }) private var inStockItems: [Item]
+   ```
+
+2. **Use `@Environment(\.modelContext)` for CRUD operations**
+   ```swift
+   @Environment(\.modelContext) private var modelContext
+   ```
+
+3. **Insert/Delete patterns**
+   ```swift
+   // Insert
+   let newItem = Item(name: "T-Shirt")
+   modelContext.insert(newItem)
+   
+   // Delete
+   modelContext.delete(item)
+   ```
+
+4. **Avoid using reserved keywords** like `description` for property names
+
+5. **Use appropriate delete rules for relationships**:
+   - `.nullify` - Set relationship to nil when related object is deleted
+   - `.cascade` - Delete related objects when parent is deleted
+   - `.deny` - Prevent deletion if relationships exist
+
+### SwiftData Best Practices
+- Keep models simple and focused
+- Use computed properties for derived values
+- Prefer value types (structs) for non-persisted data
+- Use `@Transient` for properties that shouldn't be persisted
+- Handle schema migrations explicitly for production apps
+
+---
+
+## iOS 26 SwiftUI Guidelines
+
+### New iOS 26 Features to Leverage
+- **Liquid Glass design language** - Use glass materials and translucency appropriately
+- **Enhanced NavigationStack** with improved type-safe navigation
+- **New container views and layouts**
+- **Improved Charts framework**
+- **Enhanced ShareLink and drag-and-drop**
+
+### Glass Material Usage (iOS 26)
+```swift
+// Use the new glass effect for floating UI elements
+.glassEffect()
+.glassEffect(.regular)
+
+// For backgrounds
+.background(.ultraThinMaterial)
+.background(.regularMaterial)
+.background(.thickMaterial)
+```
+
+### Navigation Patterns
+```swift
+// Prefer NavigationStack over NavigationView
+NavigationStack {
+    List(items) { item in
+        NavigationLink(value: item) {
+            ItemRow(item: item)
+        }
+    }
+    .navigationDestination(for: Item.self) { item in
+        ItemDetailView(item: item)
+    }
+}
+```
+
+### Modern List Styling
+```swift
+List {
+    // Content
+}
+.listStyle(.insetGrouped)  // iOS default style
+.listRowBackground(Color.clear)  // For custom backgrounds
+.listRowSeparator(.hidden)  // Hide separators when needed
+```
+
+---
+
+## UI/UX Guidelines
+
+### Design Principles
+- Follow Apple Human Interface Guidelines
+- Use SF Symbols for iconography (prefer filled variants for selected states)
+- Support Dynamic Type for accessibility
+- Support both light and dark mode
+- Design for different screen sizes (iPhone, iPad)
+
+### Common Patterns
+- Use sheets for creation flows
+- Use confirmation dialogs for destructive actions
+- Provide haptic feedback for important interactions
+- Use pull-to-refresh where appropriate
+- Support swipe actions on list items
+
+### Accessibility
+```swift
+// Always provide accessibility labels
+.accessibilityLabel("Item name: \(item.name)")
+.accessibilityHint("Double tap to view details")
+.accessibilityAddTraits(.isButton)
+```
+
+---
+
+## Error Handling
+
+### User-Facing Errors
+```swift
+// Use alerts for user-facing errors
+.alert("Error", isPresented: $showError) {
+    Button("OK") { }
+} message: {
+    Text(errorMessage)
+}
+```
+
+### SwiftData Error Handling
+```swift
+do {
+    try modelContext.save()
+} catch {
+    // Handle error appropriately
+    print("Failed to save: \(error)")
+}
+```
+
+---
+
+## Testing Guidelines
+
+### Unit Tests
+- Test model logic and computed properties
+- Test any business logic in ViewModels/Services
+- Use in-memory ModelContainer for SwiftData tests:
+  ```swift
+  let config = ModelConfiguration(isStoredInMemoryOnly: true)
+  let container = try ModelContainer(for: Item.self, configurations: config)
+  ```
+
+### UI Tests
+- Test critical user flows
+- Verify accessibility identifiers are set for testability
+
+---
+
+## Common Pitfalls to Avoid
+
+1. **Don't use `description` as a property name** - It conflicts with Swift's `CustomStringConvertible`
+2. **Don't forget to handle optional relationships** in SwiftData
+3. **Don't put heavy logic in view bodies** - Extract to methods or computed properties
+4. **Don't ignore memory management** - Be careful with closures capturing self
+5. **Don't hardcode strings** - Use String Catalogs for localization
+6. **Don't forget to test on actual devices** - Simulator doesn't catch all issues
+
+---
+
+## Useful Code Snippets
+
+### Empty State View
+```swift
+ContentUnavailableView(
+    "No Items",
+    systemImage: "tray",
+    description: Text("Add your first item to get started")
+)
+```
+
+### Search with SwiftData
+```swift
+@Query private var items: [Item]
+@State private var searchText = ""
+
+var filteredItems: [Item] {
+    if searchText.isEmpty {
+        return items
+    }
+    return items.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+}
+```
+
+### Confirmation Dialog
+```swift
+.confirmationDialog("Delete Item?", isPresented: $showDeleteConfirmation) {
+    Button("Delete", role: .destructive) {
+        deleteItem()
+    }
+}
+```
+
+---
+
+## When Generating Code
+
+1. **Always import necessary frameworks** (SwiftUI, SwiftData)
+2. **Use iOS 26 APIs** - Don't use deprecated patterns
+3. **Follow the established patterns** in the codebase
+4. **Keep accessibility in mind** from the start
+5. **Provide meaningful comments** for complex logic
+6. **Use Preview providers** for all views
+

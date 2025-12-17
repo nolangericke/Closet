@@ -1,0 +1,271 @@
+---
+description: SwiftUI component patterns for the Closet inventory app
+globs: ["**/*.swift"]
+alwaysApply: false
+---
+
+# SwiftUI Component Patterns
+
+## View Structure
+
+### Basic View Template
+```swift
+import SwiftUI
+import SwiftData
+
+struct ItemDetailView: View {
+    let item: Item
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    
+    var body: some View {
+        // View content
+    }
+}
+
+#Preview {
+    let config = ModelConfiguration(isStoredInMemoryOnly: true)
+    let container = try! ModelContainer(for: Item.self, configurations: config)
+    let item = Item(name: "Preview Item")
+    container.mainContext.insert(item)
+    
+    return ItemDetailView(item: item)
+        .modelContainer(container)
+}
+```
+
+### List View with SwiftData
+```swift
+struct ItemListView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Item.name) private var items: [Item]
+    @State private var showAddSheet = false
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                if items.isEmpty {
+                    ContentUnavailableView(
+                        "No Items",
+                        systemImage: "tray",
+                        description: Text("Tap + to add your first item")
+                    )
+                } else {
+                    ForEach(items) { item in
+                        NavigationLink(value: item) {
+                            ItemRow(item: item)
+                        }
+                    }
+                    .onDelete(perform: deleteItems)
+                }
+            }
+            .navigationTitle("Items")
+            .navigationDestination(for: Item.self) { item in
+                ItemDetailView(item: item)
+            }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showAddSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .sheet(isPresented: $showAddSheet) {
+                AddItemView()
+            }
+        }
+    }
+    
+    private func deleteItems(at offsets: IndexSet) {
+        for index in offsets {
+            modelContext.delete(items[index])
+        }
+    }
+}
+```
+
+## Form Patterns
+
+### Add/Edit Form
+```swift
+struct AddItemView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    
+    @State private var name = ""
+    @State private var quantity = 1
+    @State private var selectedCategory: Category?
+    
+    @Query(sort: \Category.name) private var categories: [Category]
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Details") {
+                    TextField("Name", text: $name)
+                    Stepper("Quantity: \(quantity)", value: $quantity, in: 1...99)
+                }
+                
+                Section("Category") {
+                    Picker("Category", selection: $selectedCategory) {
+                        Text("None").tag(nil as Category?)
+                        ForEach(categories) { category in
+                            Text(category.name).tag(category as Category?)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add Item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { saveItem() }
+                        .disabled(name.isEmpty)
+                }
+            }
+        }
+    }
+    
+    private func saveItem() {
+        let item = Item(name: name)
+        item.quantity = quantity
+        item.category = selectedCategory
+        modelContext.insert(item)
+        dismiss()
+    }
+}
+```
+
+## Search Implementation
+
+```swift
+struct SearchableItemList: View {
+    @Query(sort: \Item.name) private var items: [Item]
+    @State private var searchText = ""
+    
+    var filteredItems: [Item] {
+        if searchText.isEmpty {
+            return items
+        }
+        return items.filter { 
+            $0.name.localizedCaseInsensitiveContains(searchText) 
+        }
+    }
+    
+    var body: some View {
+        List(filteredItems) { item in
+            ItemRow(item: item)
+        }
+        .searchable(text: $searchText, prompt: "Search items")
+    }
+}
+```
+
+## Swipe Actions
+
+```swift
+ForEach(items) { item in
+    ItemRow(item: item)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                deleteItem(item)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .leading) {
+            Button {
+                duplicateItem(item)
+            } label: {
+                Label("Duplicate", systemImage: "plus.square.on.square")
+            }
+            .tint(.blue)
+        }
+}
+```
+
+## Context Menus
+
+```swift
+ItemRow(item: item)
+    .contextMenu {
+        Button {
+            editItem(item)
+        } label: {
+            Label("Edit", systemImage: "pencil")
+        }
+        
+        Button {
+            duplicateItem(item)
+        } label: {
+            Label("Duplicate", systemImage: "plus.square.on.square")
+        }
+        
+        Divider()
+        
+        Button(role: .destructive) {
+            deleteItem(item)
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+```
+
+## Confirmation Dialogs
+
+```swift
+@State private var itemToDelete: Item?
+
+Button("Delete") {
+    itemToDelete = item
+}
+.confirmationDialog(
+    "Delete Item?",
+    isPresented: .init(
+        get: { itemToDelete != nil },
+        set: { if !$0 { itemToDelete = nil } }
+    ),
+    presenting: itemToDelete
+) { item in
+    Button("Delete \(item.name)", role: .destructive) {
+        modelContext.delete(item)
+        itemToDelete = nil
+    }
+} message: { item in
+    Text("This will permanently delete \(item.name).")
+}
+```
+
+## iOS 26 Specific Patterns
+
+### Glass Effects
+```swift
+// Use for floating UI elements
+.background(.ultraThinMaterial)
+.clipShape(RoundedRectangle(cornerRadius: 16))
+
+// Glass effect modifier (iOS 26)
+.glassEffect()
+```
+
+### Modern Tab View
+```swift
+TabView {
+    Tab("Items", systemImage: "tray.full") {
+        ItemListView()
+    }
+    
+    Tab("Categories", systemImage: "folder") {
+        CategoryListView()
+    }
+    
+    Tab("Settings", systemImage: "gear") {
+        SettingsView()
+    }
+}
+```
