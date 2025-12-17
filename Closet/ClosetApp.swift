@@ -14,6 +14,8 @@ struct ClosetApp: App {
         
         // Define which models SwiftData should manage
         let schema = Schema([
+            Category.self,
+            Collection.self,
             Item.self,
         ])
         
