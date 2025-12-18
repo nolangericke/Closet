@@ -14,6 +14,7 @@ struct ContentView: View {
     
     @State private var searchText = ""
     @State private var showAddCategory = false
+    @State private var categoryToEdit: Category?
     
     var body: some View {
         NavigationStack {
@@ -26,21 +27,50 @@ struct ContentView: View {
                         description: Text("Tap rectangle stack to create your first category")
                     )
                 } else {
-                    // Category List
                     List {
+                        // Smart Folders
+                        Section {
+                            LazyVGrid(columns: [
+                                GridItem(.flexible(), spacing: 12),
+                                GridItem(.flexible(), spacing: 12)
+                            ], spacing: 12) {
+                                SmartFolderTile(title: "Inbox", icon: "tray", count: 0)
+                                SmartFolderTile(title: "Saved", icon: "bookmark.fill", count: 0)
+                                SmartFolderTile(title: "Wanted", icon: "heart.fill", count: 0)
+                                SmartFolderTile(title: "Recently Deleted", icon: "trash", count: 0)
+                            }
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        // Categories
                         Section {
                             ForEach(categories) { category in
                                 NavigationLink(value: category) {
                                     CategoryRow(category: category)
+                                }
+                                .contextMenu {
+                                    Button {
+                                        categoryToEdit = category
+                                    } label: {
+                                        Label("Edit Category", systemImage: "pencil")
+                                    }
+                                    
+                                    Button(role: .destructive) {
+                                        modelContext.delete(category)
+                                    } label: {
+                                        Label("Delete Category", systemImage: "trash")
+                                    }
                                 }
                             }
                         } header: {
                             Text("Categories")
                                 .font(.title2)
                                 .fontWeight(.bold)
-                                .foregroundColor(.primary)
+                                .foregroundStyle(.primary)
+                                .textCase(nil)
                         }
                     }
+                    .listStyle(.insetGrouped)
                 }
             }
             .navigationTitle("Closet")
@@ -49,6 +79,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showAddCategory) {
                 AddCategorySheet()
+            }
+            .sheet(item: $categoryToEdit) { category in
+                EditCategorySheet(category: category)
             }
             .searchable(text: $searchText)
             .toolbar {
@@ -75,16 +108,57 @@ struct ContentView: View {
     }
 }
 
+
+// MARK: - Smart Folder Tile
+
+struct SmartFolderTile: View {
+    let title: String
+    let icon: String
+    let count: Int
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(.white.opacity(0.2))
+                    .clipShape(Circle())
+                
+                Spacer()
+                
+                Text("\(count)")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.white)
+            }
+            
+            Text(title)
+                .font(.callout)
+                .fontWeight(.medium)
+                .foregroundStyle(.white.opacity(0.9))
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.gray)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
 // MARK: - Category Row
 
 struct CategoryRow: View {
     let category: Category
     
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Image(systemName: category.icon ?? "folder.fill")
-                .foregroundStyle(.blue)
-                .frame(width: 30)
+                .font(.body)
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(.blue)
+                .clipShape(Circle())
             
             Text(category.name)
             
@@ -96,60 +170,8 @@ struct CategoryRow: View {
     }
 }
 
-// MARK: - Add Category Sheet
 
-struct AddCategorySheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    
-    @State private var name = ""
-    @State private var icon = "folder.fill"
-    
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Category Name", text: $name)
-                }
-                
-                Section("Icon") {
-                    TextField("SF Symbol Name", text: $icon)
-                    
-                    // Preview the icon
-                    HStack {
-                        Text("Preview:")
-                        Spacer()
-                        Image(systemName: icon)
-                            .font(.title2)
-                            .foregroundStyle(.blue)
-                    }
-                }
-            }
-            .navigationTitle("New Category")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        addCategory()
-                    }
-                    .disabled(name.isEmpty)
-                }
-            }
-        }
-    }
-    
-    private func addCategory() {
-        let category = Category(
-            name: name,
-            icon: icon.isEmpty ? nil : icon
-        )
-        modelContext.insert(category)
-        dismiss()
-    }
-}
+
 
 // MARK: - Collection List View (Placeholder)
 
