@@ -7,14 +7,17 @@
 
 import SwiftUI
 import SwiftData
+import PhotosUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \Category.sortOrder) private var categories: [Category]
     
     @State private var searchText = ""
     @State private var showAddCategory = false
     @State private var categoryToEdit: Category?
+    @State private var refreshID = UUID()
     
     var body: some View {
         NavigationStack {
@@ -103,6 +106,13 @@ struct ContentView: View {
                     }
                     .buttonStyle(.glassProminent)
                 }
+            }
+        }
+        .id(refreshID)
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if newPhase == .active {
+                // Refresh data when app becomes active (e.g., after using Share Extension)
+                refreshID = UUID()
             }
         }
     }
@@ -386,11 +396,458 @@ struct EditCollectionSheet: View {
 // MARK: - Item List View (Placeholder)
 
 struct ItemListView: View {
+    @Environment(\.modelContext) private var modelContext
     let collection: Collection
     
+    @State private var showAddItem = false
+    @State private var itemToEdit: Item?
+    
     var body: some View {
-        Text("Items in \(collection.name)")
-            .navigationTitle(collection.name)
+        Group {
+            if collection.items.isEmpty {
+                ContentUnavailableView(
+                    "No Items",
+                    systemImage: "tray",
+                    description: Text("Add items to \(collection.name)")
+                )
+            } else {
+                List {
+                    // Show limit warning if at capacity
+                    if collection.isAtLimit {
+                        Section {
+                            Label("Collection is at capacity", systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    
+                    // Group items by status
+                    let ownedItems = collection.items.filter { $0.status == .owned }
+                    let wantItems = collection.items.filter { $0.status == .want }
+                    let savedItems = collection.items.filter { $0.status == .saved }
+                    
+                    if !ownedItems.isEmpty {
+                        Section("Owned") {
+                            ForEach(ownedItems) { item in
+                                ItemRow(item: item)
+                                    .contextMenu {
+                                        itemContextMenu(for: item)
+                                    }
+                            }
+                        }
+                    }
+                    
+                    if !wantItems.isEmpty {
+                        Section("Want") {
+                            ForEach(wantItems) { item in
+                                ItemRow(item: item)
+                                    .contextMenu {
+                                        itemContextMenu(for: item)
+                                    }
+                            }
+                        }
+                    }
+                    
+                    if !savedItems.isEmpty {
+                        Section("Saved") {
+                            ForEach(savedItems) { item in
+                                ItemRow(item: item)
+                                    .contextMenu {
+                                        itemContextMenu(for: item)
+                                    }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+            }
+        }
+        .navigationTitle(collection.name)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showAddItem = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $showAddItem) {
+            AddItemSheet(collection: collection)
+        }
+        .sheet(item: $itemToEdit) { item in
+            EditItemSheet(item: item, collection: collection)
+        }
+    }
+    
+    @ViewBuilder
+    private func itemContextMenu(for item: Item) -> some View {
+        Button {
+            itemToEdit = item
+        } label: {
+            Label("Edit Item", systemImage: "pencil")
+        }
+        
+        Menu("Change Status") {
+            ForEach(ItemStatus.allCases, id: \.self) { status in
+                Button {
+                    // Check if trying to mark as owned when at limit
+                    if status == .owned && collection.isAtLimit && item.status != .owned {
+                        // Already at limit, can't add more owned
+                    } else {
+                        item.status = status
+                        item.touch()
+                    }
+                } label: {
+                    Label(status.displayName, systemImage: status.icon)
+                }
+                .disabled(status == .owned && collection.isAtLimit && item.status != .owned)
+            }
+        }
+        
+        Button(role: .destructive) {
+            modelContext.delete(item)
+        } label: {
+            Label("Delete Item", systemImage: "trash")
+        }
+    }
+}
+
+// MARK: - Item Row
+
+struct ItemRow: View {
+    let item: Item
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Photo or placeholder
+            if let photoData = item.photo, let uiImage = UIImage(data: photoData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 50, height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 50, height: 50)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.name)
+                    .font(.body)
+                
+                HStack(spacing: 8) {
+                    // Status badge
+                    Label(item.status.displayName, systemImage: item.status.icon)
+                        .font(.caption)
+                        .foregroundStyle(statusColor(for: item.status))
+                    
+                    // Color if set
+                    if let color = item.color, !color.isEmpty {
+                        Text("• \(color)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            // Link indicator
+            if item.link != nil {
+                Image(systemName: "link")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+    
+    private func statusColor(for status: ItemStatus) -> Color {
+        switch status {
+        case .saved: return .orange
+        case .want: return .red
+        case .owned: return .green
+        }
+    }
+}
+
+// MARK: - Add Item Sheet
+
+struct AddItemSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    
+    let collection: Collection
+    
+    @State private var name = ""
+    @State private var color = ""
+    @State private var notes = ""
+    @State private var linkString = ""
+    @State private var status: ItemStatus = .saved
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var photoData: Data?
+    
+    private var canMarkAsOwned: Bool {
+        !collection.isAtLimit || status == .owned
+    }
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                // Photo Section
+                Section {
+                    HStack {
+                        Spacer()
+                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                            if let photoData, let uiImage = UIImage(data: photoData) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 120, height: 120)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            } else {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "photo.badge.plus")
+                                        .font(.largeTitle)
+                                    Text("Add Photo")
+                                        .font(.caption)
+                                }
+                                .frame(width: 120, height: 120)
+                                .background(Color(.systemGray5))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    
+                    if photoData != nil {
+                        Button("Remove Photo", role: .destructive) {
+                            selectedPhotoItem = nil
+                            photoData = nil
+                        }
+                    }
+                }
+                .listRowBackground(Color.clear)
+                
+                Section {
+                    TextField("Item Name", text: $name)
+                    TextField("Color (optional)", text: $color)
+                }
+                
+                Section {
+                    Picker("Status", selection: $status) {
+                        ForEach(ItemStatus.allCases, id: \.self) { status in
+                            Label(status.displayName, systemImage: status.icon)
+                                .tag(status)
+                        }
+                    }
+                    
+                    if collection.isAtLimit && status != .owned {
+                        Label("Collection at capacity for owned items", systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                
+                Section {
+                    TextField("Link (optional)", text: $linkString)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .autocapitalization(.none)
+                }
+                
+                Section("Notes") {
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 100)
+                }
+            }
+            .navigationTitle("New Item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        addItem()
+                    }
+                    .disabled(name.isEmpty)
+                }
+            }
+            .onChange(of: selectedPhotoItem) { oldItem, newItem in
+                Task {
+                    if let data = try? await newItem?.loadTransferable(type: Data.self) {
+                        photoData = data
+                    }
+                }
+            }
+        }
+    }
+    
+    private func addItem() {
+        // Prevent adding as owned if at limit
+        let finalStatus = (status == .owned && collection.isAtLimit) ? .want : status
+        
+        let item = Item(
+            name: name,
+            status: finalStatus,
+            photo: photoData,
+            color: color.isEmpty ? nil : color,
+            notes: notes.isEmpty ? nil : notes,
+            link: URL(string: linkString)
+        )
+        item.collection = collection
+        modelContext.insert(item)
+        dismiss()
+    }
+}
+
+// MARK: - Edit Item Sheet
+
+struct EditItemSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var item: Item
+    let collection: Collection
+    
+    @State private var name: String
+    @State private var color: String
+    @State private var notes: String
+    @State private var linkString: String
+    @State private var status: ItemStatus
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var photoData: Data?
+    
+    init(item: Item, collection: Collection) {
+        self.item = item
+        self.collection = collection
+        self._name = State(initialValue: item.name)
+        self._color = State(initialValue: item.color ?? "")
+        self._notes = State(initialValue: item.notes ?? "")
+        self._linkString = State(initialValue: item.link?.absoluteString ?? "")
+        self._status = State(initialValue: item.status)
+        self._photoData = State(initialValue: item.photo)
+    }
+    
+    private var canMarkAsOwned: Bool {
+        !collection.isAtLimit || item.status == .owned
+    }
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                // Photo Section
+                Section {
+                    HStack {
+                        Spacer()
+                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                            if let photoData, let uiImage = UIImage(data: photoData) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 120, height: 120)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            } else {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "photo.badge.plus")
+                                        .font(.largeTitle)
+                                    Text("Add Photo")
+                                        .font(.caption)
+                                }
+                                .frame(width: 120, height: 120)
+                                .background(Color(.systemGray5))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    
+                    if photoData != nil {
+                        Button("Remove Photo", role: .destructive) {
+                            selectedPhotoItem = nil
+                            photoData = nil
+                        }
+                    }
+                }
+                .listRowBackground(Color.clear)
+                
+                Section {
+                    TextField("Item Name", text: $name)
+                    TextField("Color (optional)", text: $color)
+                }
+                
+                Section {
+                    Picker("Status", selection: $status) {
+                        ForEach(ItemStatus.allCases, id: \.self) { s in
+                            Label(s.displayName, systemImage: s.icon)
+                                .tag(s)
+                        }
+                    }
+                    
+                    if collection.isAtLimit && item.status != .owned && status == .owned {
+                        Label("Collection at capacity", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                
+                Section {
+                    TextField("Link (optional)", text: $linkString)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .autocapitalization(.none)
+                }
+                
+                Section("Notes") {
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 100)
+                }
+            }
+            .navigationTitle("Edit Item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saveChanges()
+                    }
+                    .disabled(name.isEmpty)
+                }
+            }
+            .onChange(of: selectedPhotoItem) { oldItem, newItem in
+                Task {
+                    if let data = try? await newItem?.loadTransferable(type: Data.self) {
+                        photoData = data
+                    }
+                }
+            }
+        }
+    }
+    
+    private func saveChanges() {
+        item.name = name
+        item.color = color.isEmpty ? nil : color
+        item.notes = notes.isEmpty ? nil : notes
+        item.link = URL(string: linkString)
+        item.photo = photoData
+        
+        // Only change to owned if not at limit (or already owned)
+        if status == .owned && collection.isAtLimit && item.status != .owned {
+            // Can't change to owned, keep current
+        } else {
+            item.status = status
+        }
+        
+        item.touch()
+        dismiss()
     }
 }
 

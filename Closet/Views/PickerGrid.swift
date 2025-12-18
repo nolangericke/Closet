@@ -38,9 +38,9 @@ struct IconCell: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(isSelected ? Color.blue.opacity(0.3) : Color(.tertiarySystemBackground))
+                .fill(isSelected ? Color.blue.opacity(0.3) : Color(.secondarySystemFill))
             Image(systemName: name)
-                .foregroundStyle(isSelected ? .blue : .white)
+                .foregroundStyle(isSelected ? .blue : .primary)
                 .fontWeight(.bold)
         }
     }
