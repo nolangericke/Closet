@@ -10,6 +10,11 @@ import SwiftData
 
 @main
 struct ClosetApp: App {
+    
+    init() {
+        AppAppearance.configure()  // Configures Navigation Bar headers to use SF Pro Rounded
+    }
+    
     var sharedModelContainer: ModelContainer = {
         
         // Define which models SwiftData should manage
@@ -45,6 +50,7 @@ struct ClosetApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .fontDesign(.rounded)
         }
         .modelContainer(sharedModelContainer)
     }
