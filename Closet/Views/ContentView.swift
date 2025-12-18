@@ -173,14 +173,224 @@ struct CategoryRow: View {
 
 
 
-// MARK: - Collection List View (Placeholder)
+// MARK: - Collection List View
 
 struct CollectionListView: View {
+    @Environment(\.modelContext) private var modelContext
     let category: Category
     
+    @State private var showAddCollection = false
+    @State private var collectionToEdit: Collection?
+    
     var body: some View {
-        Text("Collections in \(category.name)")
-            .navigationTitle(category.name)
+        Group {
+            if category.collections.isEmpty {
+                ContentUnavailableView(
+                    "No Collections",
+                    systemImage: "folder",
+                    description: Text("Add a collection to organize items in \(category.name)")
+                )
+            } else {
+                List {
+                    ForEach(category.collections.sorted(by: { $0.sortOrder < $1.sortOrder })) { collection in
+                        NavigationLink(value: collection) {
+                            CollectionRow(collection: collection)
+                        }
+                        .contextMenu {
+                            Button {
+                                collectionToEdit = collection
+                            } label: {
+                                Label("Edit Collection", systemImage: "pencil")
+                            }
+                            
+                            Button(role: .destructive) {
+                                modelContext.delete(collection)
+                            } label: {
+                                Label("Delete Collection", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+            }
+        }
+        .navigationTitle(category.name)
+        .navigationDestination(for: Collection.self) { collection in
+            ItemListView(collection: collection)
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showAddCollection = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $showAddCollection) {
+            AddCollectionSheet(category: category)
+        }
+        .sheet(item: $collectionToEdit) { collection in
+            EditCollectionSheet(collection: collection)
+        }
+    }
+}
+
+// MARK: - Collection Row
+
+struct CollectionRow: View {
+    let collection: Collection
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "folder.fill")
+                .font(.body)
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(.orange)
+                .clipShape(Circle())
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(collection.name)
+                
+                if let limit = collection.itemLimit {
+                    Text("\(collection.ownedCount) / \(limit) owned")
+                        .font(.caption)
+                        .foregroundStyle(collection.isAtLimit ? .red : .secondary)
+                } else {
+                    Text("\(collection.items.count) items")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Spacer()
+        }
+    }
+}
+
+// MARK: - Add Collection Sheet
+
+struct AddCollectionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    
+    let category: Category
+    
+    @State private var name = ""
+    @State private var hasLimit = false
+    @State private var itemLimit = 10
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Collection Name", text: $name)
+                }
+                
+                Section {
+                    Toggle("Set Item Limit", isOn: $hasLimit)
+                    
+                    if hasLimit {
+                        Stepper("Limit: \(itemLimit)", value: $itemLimit, in: 1...100)
+                    }
+                } footer: {
+                    Text("Limit how many items can be marked as \"owned\" in this collection.")
+                }
+            }
+            .navigationTitle("New Collection")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        addCollection()
+                    }
+                    .disabled(name.isEmpty)
+                }
+            }
+        }
+    }
+    
+    private func addCollection() {
+        let collection = Collection(
+            name: name,
+            itemLimit: hasLimit ? itemLimit : nil,
+            sortOrder: category.collections.count
+        )
+        collection.category = category
+        modelContext.insert(collection)
+        dismiss()
+    }
+}
+
+// MARK: - Edit Collection Sheet
+
+struct EditCollectionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var collection: Collection
+    
+    @State private var name: String
+    @State private var hasLimit: Bool
+    @State private var itemLimit: Int
+    
+    init(collection: Collection) {
+        self.collection = collection
+        self._name = State(initialValue: collection.name)
+        self._hasLimit = State(initialValue: collection.itemLimit != nil)
+        self._itemLimit = State(initialValue: collection.itemLimit ?? 10)
+    }
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Collection Name", text: $name)
+                }
+                
+                Section {
+                    Toggle("Set Item Limit", isOn: $hasLimit)
+                    
+                    if hasLimit {
+                        Stepper("Limit: \(itemLimit)", value: $itemLimit, in: 1...100)
+                    }
+                } footer: {
+                    Text("Limit how many items can be marked as \"owned\" in this collection.")
+                }
+            }
+            .navigationTitle("Edit Collection")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saveChanges()
+                    }
+                    .disabled(name.isEmpty)
+                }
+            }
+        }
+    }
+    
+    private func saveChanges() {
+        collection.name = name
+        collection.itemLimit = hasLimit ? itemLimit : nil
+        dismiss()
+    }
+}
+
+// MARK: - Item List View (Placeholder)
+
+struct ItemListView: View {
+    let collection: Collection
+    
+    var body: some View {
+        Text("Items in \(collection.name)")
+            .navigationTitle(collection.name)
     }
 }
 
